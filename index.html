@@ -11,7 +11,10 @@
         submit: rpc venuevoice.submit(...) — SECURITY DEFINER; validates, honeypot,
         fill-timer, per-IP throttle (hash only, separate table), inserts. The anon key
         can read nothing from venuevoice.feedback. No name, no login, no IP stored.
-  SENDS nothing. Brand: spm-base.css. Auto-updater: apa_core.apps row "VenueVoice" →
+  SENDS one email, only for OPTED-IN submissions: the RPC mints a one-time thanks_token,
+        the page posts it to the GAS mailer (vv_thanks), which redeems it (service key, marks
+        thanked_at) and emails the player their own answers via safeMailSend. Anonymous rows
+        never get a token. Venue list = SPM hosts only. Brand: spm-base.css. Auto-updater: apa_core.apps row "VenueVoice" →
   version.js (serve-then-bump). No secrets: anon key is public.
 -->
 <html lang="en">
@@ -21,7 +24,7 @@
 <title>Your Bar, Your Say — South Portland Metro APA</title>
 <meta name="theme-color" content="#ea002a">
 <meta property="og:title" content="Your Bar, Your Say — South Portland Metro APA">
-<meta property="og:description" content="Two minutes, anonymous: tell the league what's good and what's not about where you play.">
+<meta property="og:description" content="Two minutes, anonymous: tell South Portland Metro APA what's good and what's not about where you play.">
 <link rel="stylesheet" href="https://southportlandmetroapa.github.io/shared/spm-base.css">
 <script src="version.js"></script>
 <style>
@@ -57,6 +60,18 @@
   .opt input[type=checkbox]{ width:24px; height:24px; flex:0 0 auto; margin-top:2px; }
   .opt .why{ color:var(--muted); font-size:.88rem; }
   .apa{ margin-top:12px; display:none; } .apa.show{ display:block; }
+  /* Player picker — mirrors the .cd-* picker used in CountMeIn / Slate (house rule: player selection
+     is the CueDrop lookup, never free text). Backed by countmein.member_lookup: name + APA# + team only. */
+  .cd-search{ position:relative; }
+  .cd-ac{ display:none; position:absolute; left:0; right:0; top:100%; z-index:40; background:#fff; border:1px solid #d7dbe0; border-radius:10px; margin-top:4px; box-shadow:0 8px 24px rgba(0,0,0,.12); max-height:260px; overflow:auto; }
+  .cd-ac.show{ display:block; }
+  .cd-ac-item{ padding:12px 12px; cursor:pointer; border-bottom:1px solid #f1f3f5; min-height:48px; box-sizing:border-box; }
+  .cd-ac-item:last-child{ border-bottom:0; }
+  .cd-ac-item:hover,.cd-ac-item.on{ background:#f3f4f6; }
+  .cd-ac-name{ font-weight:700; font-size:.95rem; }
+  .cd-ac-sub{ font-size:.78rem; color:#6b7280; margin-top:1px; }
+  .cd-picked{ margin-top:8px; padding:10px 12px; border-radius:10px; background:#eef6ee; border:1px solid #cfe3cf; font-size:.92rem; display:flex; gap:8px; align-items:center; justify-content:space-between; min-height:48px; }
+  .cd-picked button{ background:none; border:0; color:#b8001f; font-weight:700; cursor:pointer; font-size:.88rem; padding:6px; min-height:40px; }
   .btn{ width:100%; font:inherit; font-weight:800; font-size:1.05rem; border:none; border-radius:999px; padding:15px 20px; min-height:54px; cursor:pointer; background:linear-gradient(135deg,var(--spm-primary),var(--spm-accent)); color:#fff; }
   .btn:disabled{ background:#c9ccd6; cursor:not-allowed; }
   .btn.ghost{ background:#fff; color:var(--text); border:2px solid var(--border); margin-top:10px; }
@@ -86,7 +101,7 @@
         <fieldset>
           <legend>Which bar is this about?</legend>
           <div id="pickWrap">
-            <input id="vq" type="search" placeholder="Start typing the bar's name…" autocomplete="off" aria-label="Bar name" aria-controls="vlist" aria-expanded="false">
+            <input id="vq" type="search" placeholder="Start typing the bar's name… (SPM host bars)" autocomplete="off" aria-label="Bar name" aria-controls="vlist" aria-expanded="false">
             <div class="venues" id="vlist" role="listbox"></div>
           </div>
           <div class="picked" id="picked" hidden><b id="pickedName"></b><button type="button" id="unpick">Change</button></div>
@@ -133,8 +148,10 @@
 
         <fieldset>
           <div class="opt">
-            <label class="row"><input type="checkbox" id="contact"><span><b>It's OK to contact me about this.</b><br><span class="why">Only if you want to. Tick this and we'll ask for your APA number so the league can follow up with a question. Leave it unticked to stay completely anonymous.</span></span></label>
-            <div class="apa" id="apa"><label class="lbl" for="apanum" style="font-size:.95rem">Your APA number</label><input id="apanum" type="tel" inputmode="numeric" maxlength="9" placeholder="8 digits" autocomplete="off"></div>
+            <label class="row"><input type="checkbox" id="contact"><span><b>It's OK to contact me about this.</b><br><span class="why">Only if you want to. Tick this and pick yourself from the member list so the league can follow up with a question — and we'll email you a copy of your feedback. Leave it unticked to stay completely anonymous.</span></span></label>
+            <div class="apa" id="apa"><label class="lbl" for="cdSearch" style="font-size:.95rem">Who are you?</label>
+              <div class="cd-search"><input type="text" id="cdSearch" autocomplete="off" placeholder="Your name or APA number" aria-label="Your name or APA number"><div id="cdAc" class="cd-ac"></div><div id="cdPicked" class="cd-picked" hidden></div></div>
+              <p class="sub" style="margin:6px 0 0">Start typing and pick yourself from the list. We'll email you a copy of what you sent.</p></div>
           </div>
         </fieldset>
 
@@ -158,6 +175,7 @@
   const SB_URL = 'https://dqzbekoaysgaiqljueac.supabase.co';
   const ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRxemJla29heXNnYWlxbGp1ZWFjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUxNzA5NzgsImV4cCI6MjA5MDc0Njk3OH0.cCdGxZ4zEFzU_r6lWSDeoNWG67Q4MSYCAtpds035dfU';
   const APP_NAME = 'VenueVoice';
+  const GAS_URL = 'https://script.google.com/macros/s/AKfycbzGTzkBRTrIIP_tD6sbtOOUmNZkXDdtxPoO4c8fdWt5h3tZFueNSISPv8Q3LWStx73Whw/exec';   // apa-mailer: vv_thanks
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
   const H = { apikey: ANON, Authorization: 'Bearer ' + ANON, 'Content-Type': 'application/json', 'Content-Profile': 'venuevoice', 'Accept-Profile': 'venuevoice' };
   const rpc = async (fn, args) => { const r = await fetch(SB_URL + '/rest/v1/rpc/' + fn, { method: 'POST', headers: H, body: JSON.stringify(args || {}) }); if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); };
@@ -185,10 +203,45 @@
   document.addEventListener('click', e => { if (!$('pickWrap').contains(e.target)) hideList(); });
   $('unpick').addEventListener('click', unpick);
 
+  /* ── member picker (CountMeIn pattern; house rule: never free-text a player) ── */
+  let _cdPicked = null, _cdAc = [], _cdTimer = null, _cdFocus = -1;
+  const cdName = p => ([p.first_name, p.last_name].filter(Boolean).join(' ').trim() || '(no name)') + (p.nickname && p.nickname !== p.first_name ? ' “' + p.nickname + '”' : '');
+  const cdClose = () => $('cdAc').classList.remove('show');
+  async function cdSearch(q){
+    const r = await fetch(SB_URL + '/rest/v1/rpc/member_lookup', { method: 'POST', headers: { apikey: ANON, Authorization: 'Bearer ' + ANON, 'Content-Type': 'application/json', 'Content-Profile': 'countmein', 'Accept-Profile': 'countmein' }, body: JSON.stringify({ p_q: q }) });
+    return r.ok ? r.json() : [];
+  }
+  function cdRender(){
+    const box = $('cdAc');
+    if (!_cdAc.length) { box.innerHTML = '<div class="cd-ac-item" style="cursor:default;color:#6b7280">No matches — try your APA number.</div>'; box.classList.add('show'); return; }
+    box.innerHTML = _cdAc.map((p, i) => '<div class="cd-ac-item' + (i === _cdFocus ? ' on' : '') + '" data-i="' + i + '"><div class="cd-ac-name">' + esc(cdName(p)) + '</div><div class="cd-ac-sub">APA #' + esc(p.member_number) + (p.team_name ? ' · ' + esc(p.team_name) : '') + '</div></div>').join('');
+    [...box.querySelectorAll('.cd-ac-item[data-i]')].forEach(el => el.addEventListener('mousedown', e => { e.preventDefault(); cdPick(+el.dataset.i); }));
+    box.classList.add('show');
+  }
+  function cdPick(i){
+    const p = _cdAc[i]; if (!p) return;
+    _cdPicked = { member_number: p.member_number, name: cdName(p) };
+    cdClose(); $('cdSearch').value = ''; $('cdSearch').hidden = true;
+    const box = $('cdPicked'); box.hidden = false;
+    box.innerHTML = '<span>✓ ' + esc(_cdPicked.name) + ' · APA #' + esc(p.member_number) + '</span><button type="button" id="cdClear">Not you?</button>';
+    $('cdClear').addEventListener('click', cdClear);
+  }
+  function cdClear(){ _cdPicked = null; $('cdPicked').hidden = true; $('cdPicked').innerHTML = ''; $('cdSearch').hidden = false; $('cdSearch').value = ''; cdClose(); }
+  (function cdWire(){
+    const input = $('cdSearch');
+    input.addEventListener('input', () => { clearTimeout(_cdTimer); const v = input.value.trim(); if (v.length < 2) { cdClose(); return; } _cdTimer = setTimeout(async () => { try { _cdAc = await cdSearch(v); _cdFocus = -1; cdRender(); } catch (e) { cdClose(); } }, 250); });
+    input.addEventListener('keydown', e => { if (!$('cdAc').classList.contains('show')) return;
+      if (e.key === 'ArrowDown') { e.preventDefault(); _cdFocus = Math.min(_cdAc.length - 1, _cdFocus + 1); cdRender(); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); _cdFocus = Math.max(0, _cdFocus - 1); cdRender(); }
+      else if (e.key === 'Enter') { e.preventDefault(); if (_cdFocus >= 0) cdPick(_cdFocus); }
+      else if (e.key === 'Escape') cdClose(); });
+    document.addEventListener('click', e => { if (!e.target.closest('.cd-search')) cdClose(); });
+  })();
+
   /* ── rating / chips / contact ── */
   $('rate').querySelectorAll('button').forEach(b => b.addEventListener('click', () => { S.rating = Number(b.dataset.r); $('rate').querySelectorAll('button').forEach(o => o.setAttribute('aria-pressed', o === b ? 'true' : 'false')); }));
   $('chips').querySelectorAll('.chip').forEach(b => b.addEventListener('click', () => { const t = b.dataset.t; if (S.themes.has(t)) S.themes.delete(t); else S.themes.add(t); b.setAttribute('aria-pressed', S.themes.has(t) ? 'true' : 'false'); }));
-  $('contact').addEventListener('change', () => { const on = $('contact').checked; $('apa').classList.toggle('show', on); $('send').textContent = on ? 'Send with my APA number' : 'Send anonymously'; $('fine').textContent = on ? 'Only your APA number goes with this — so the league can follow up.' : 'Nothing you type here is tied to you.'; if (on) setTimeout(() => $('apanum').focus(), 50); });
+  $('contact').addEventListener('change', () => { const on = $('contact').checked; $('apa').classList.toggle('show', on); $('send').textContent = on ? 'Send with my APA number' : 'Send anonymously'; $('fine').textContent = on ? 'Your APA number goes with this so the league can follow up — and you get an emailed copy.' : 'Nothing you type here is tied to you.'; if (on) setTimeout(() => $('cdSearch').focus(), 50); });
 
   /* ── submit ── */
   $('f').addEventListener('submit', async e => {
@@ -199,19 +252,22 @@
     if (S.other && other.length < 2) { err.textContent = 'Which bar is this about?'; $('vother').focus(); return; }
     const q1 = $('q1').value.trim(), q2 = $('q2').value.trim(), q3 = $('q3').value.trim();
     if (!S.rating && !q1 && !q2 && !q3) { err.textContent = 'Tap a rating or answer at least one question.'; return; }
-    const contact = $('contact').checked, apa = $('apanum').value.replace(/\D/g, '');
-    if (contact && apa.length !== 8) { err.textContent = 'Your APA number is 8 digits — or untick the contact box to stay anonymous.'; $('apanum').focus(); return; }
+    const contact = $('contact').checked, apa = _cdPicked ? _cdPicked.member_number : '';
+    if (contact && !apa) { err.textContent = 'Pick yourself from the list — or untick the contact box to stay anonymous.'; $('cdSearch').focus(); return; }
     $('send').disabled = true;
     try {
       const r = await rpc('submit', { p_host_id: S.host ? S.host.host_id : null, p_venue_name: S.other ? other : null, p_rating: S.rating, p_good: q1, p_bad: q2, p_change: q3, p_themes: [...S.themes], p_contact_ok: contact, p_member_number: contact ? apa : null, p_hp: $('hp').value, p_fill_ms: Date.now() - S.opened });
       if (!r || !r.ok) { err.textContent = (r && r.error) || 'Something went wrong — try again.'; $('send').disabled = false; return; }
-      $('thanksMsg').textContent = contact ? 'Your feedback went to the league with your APA number, in case they have a question.' : 'Your feedback went straight to the league — anonymously.';
+      $('thanksMsg').textContent = contact ? 'Your feedback went to the league with your APA number — a copy is on its way to your email.' : 'Your feedback went straight to the league — anonymously.';
+      /* opted-in only: the RPC minted a one-time token; the mailer redeems it and emails the copy.
+         text/plain to GAS (never application/json — CORS preflight). Fire-and-forget. */
+      if (contact && r.thanks_token) { try { fetch(GAS_URL, { method: 'POST', body: JSON.stringify({ action: 'vv_thanks', token: r.thanks_token }) }); } catch (e) {} }
       $('f').hidden = true; $('thanks').hidden = false; window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (ex) { err.textContent = 'Could not send — check your connection and try again.'; $('send').disabled = false; }
   });
   /* a second review keeps the ORIGINAL open time — the person has already proven they are not a bot;
      resetting it made every follow-up review look like a <4 s bot fill and vanish silently (found in VERIFY) */
-  $('again').addEventListener('click', () => { $('f').reset(); S.host = null; S.other = false; S.rating = null; S.themes.clear(); unpick(); $('rate').querySelectorAll('button').forEach(o => o.setAttribute('aria-pressed', 'false')); $('chips').querySelectorAll('.chip').forEach(o => o.setAttribute('aria-pressed', 'false')); $('apa').classList.remove('show'); $('send').disabled = false; $('send').textContent = 'Send anonymously'; $('fine').textContent = 'Nothing you type here is tied to you.'; $('thanks').hidden = true; $('f').hidden = false; window.scrollTo(0, 0); });
+  $('again').addEventListener('click', () => { $('f').reset(); S.host = null; S.other = false; S.rating = null; S.themes.clear(); unpick(); $('rate').querySelectorAll('button').forEach(o => o.setAttribute('aria-pressed', 'false')); $('chips').querySelectorAll('.chip').forEach(o => o.setAttribute('aria-pressed', 'false')); $('apa').classList.remove('show'); cdClear(); $('send').disabled = false; $('send').textContent = 'Send anonymously'; $('fine').textContent = 'Nothing you type here is tied to you.'; $('thanks').hidden = true; $('f').hidden = false; window.scrollTo(0, 0); });
 
   /* ── Auto-updater (checkVersion → pollForDeploy; reference_deploy.md) ── */
   function cmpVer(a, b){ const pa = String(a).split('.'), pb = String(b).split('.'); for (let i = 0; i < Math.max(pa.length, pb.length); i++) { const x = parseInt(pa[i], 10) || 0, y = parseInt(pb[i], 10) || 0; if (x > y) return 1; if (x < y) return -1; } return 0; }
