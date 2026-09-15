@@ -25,6 +25,8 @@
 <link rel="stylesheet" href="https://southportlandmetroapa.github.io/shared/spm-base.css">
 <script src="version.js"></script>
 <style>
+  /* the hidden attribute must beat class display rules (.picked{display:flex} etc.) */
+  [hidden]{ display:none !important; }
   .spm-page{ max-width:600px; }
   .lead{ color:var(--muted); margin:2px 0 14px; font-size:.98rem; }
   .anon{ display:flex; gap:10px; align-items:flex-start; background:#eef6ff; border:1px solid #cfe1ff; border-radius:14px; padding:12px 14px; margin:0 0 18px; font-size:.93rem; color:#0b2a6b; }
