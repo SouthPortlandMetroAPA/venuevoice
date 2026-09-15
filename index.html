@@ -7,7 +7,7 @@
         questions (what's good / what's not / change one thing), optionally tags themes,
         and sends. ANONYMOUS by default and it says so; an explicit checkbox reveals an
         APA-number field for players who are happy to be contacted.
-  DATA  venues: rpc venuevoice.venues() (the schedule's host list, racktime.hosts).
+  DATA  venues: rpc venuevoice.venues() (hosts on the current session's RackTime schedule).
         submit: rpc venuevoice.submit(...) — SECURITY DEFINER; validates, honeypot,
         fill-timer, per-IP throttle (hash only, separate table), inserts. The anon key
         can read nothing from venuevoice.feedback. No name, no login, no IP stored.
