@@ -1,0 +1,56 @@
+openapi: 3.1.0
+info:
+  title: VenueVoice feedback API (South Portland Metro APA)
+  version: "1.0"
+  description: >
+    Read-only access to anonymous player feedback about league host locations.
+    Every call needs the anon `apikey` header (or `?apikey=` query param) AND the
+    VenueVoice access key as `p_key`. The access key is shown in Slate ▸ VenueVoice.
+servers:
+  - url: https://dqzbekoaysgaiqljueac.supabase.co/rest/v1
+paths:
+  /rpc/venuevoice_feedback:
+    get:
+      operationId: listFeedback
+      summary: Every feedback response (newest first)
+      parameters:
+        - { name: p_key, in: query, required: true, schema: { type: string }, description: VenueVoice access key }
+      responses:
+        "200":
+          description: Array of responses; empty array when the key is wrong
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id: { type: integer }
+                    submitted_at: { type: string, format: date-time }
+                    venue: { type: string }
+                    host_id: { type: [integer, "null"] }
+                    rating: { type: [integer, "null"], description: 1 terrible … 5 love it }
+                    whats_good: { type: [string, "null"] }
+                    whats_not_good: { type: [string, "null"] }
+                    change_one_thing: { type: [string, "null"] }
+                    themes: { type: array, items: { type: string, enum: [tables, lighting, staff, food, parking, space, safety, prices] } }
+                    contact_ok: { type: boolean }
+                    apa_number: { type: [string, "null"], description: present only when the player opted in to be contacted }
+                    operator_note: { type: [string, "null"] }
+  /rpc/venuevoice_summary:
+    get:
+      operationId: summarizeByVenue
+      summary: Per-venue aggregate (responses, average rating, theme counts)
+      parameters:
+        - { name: p_key, in: query, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Array of per-venue summaries; empty when the key is wrong
+components:
+  securitySchemes:
+    supabaseAnon:
+      type: apiKey
+      in: header
+      name: apikey
+security:
+  - supabaseAnon: []

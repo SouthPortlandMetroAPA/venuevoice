@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<!--
+  VenueVoice — South Portland Metro APA · anonymous player feedback on host locations (v0.1)
+  ─────────────────────────────────────────────────────────────────────────────
+  Brief: tools/claude/briefs/2026-09-15-venuevoice-host-feedback.md  (T2)
+  WHAT  a player picks the bar they play at, taps a 1–5 rating, answers three open
+        questions (what's good / what's not / change one thing), optionally tags themes,
+        and sends. ANONYMOUS by default and it says so; an explicit checkbox reveals an
+        APA-number field for players who are happy to be contacted.
+  DATA  venues: rpc venuevoice.venues() (the schedule's host list, racktime.hosts).
+        submit: rpc venuevoice.submit(...) — SECURITY DEFINER; validates, honeypot,
+        fill-timer, per-IP throttle (hash only, separate table), inserts. The anon key
+        can read nothing from venuevoice.feedback. No name, no login, no IP stored.
+  SENDS nothing. Brand: spm-base.css. Auto-updater: apa_core.apps row "VenueVoice" →
+  version.js (serve-then-bump). No secrets: anon key is public.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Your Bar, Your Say — South Portland Metro APA</title>
+<meta name="theme-color" content="#ea002a">
+<meta property="og:title" content="Your Bar, Your Say — South Portland Metro APA">
+<meta property="og:description" content="Two minutes, anonymous: tell the league what's good and what's not about where you play.">
+<link rel="stylesheet" href="https://southportlandmetroapa.github.io/shared/spm-base.css">
+<script src="version.js"></script>
+<style>
+  .spm-page{ max-width:600px; }
+  .lead{ color:var(--muted); margin:2px 0 14px; font-size:.98rem; }
+  .anon{ display:flex; gap:10px; align-items:flex-start; background:#eef6ff; border:1px solid #cfe1ff; border-radius:14px; padding:12px 14px; margin:0 0 18px; font-size:.93rem; color:#0b2a6b; }
+  .anon b{ display:block; }
+  fieldset{ border:none; padding:0; margin:0 0 22px; }
+  legend, .lbl{ font-weight:800; font-size:1.05rem; margin:0 0 6px; display:block; color:var(--text); }
+  .sub{ color:var(--muted); font-size:.88rem; margin:0 0 10px; }
+  input[type=text],input[type=search],input[type=tel],textarea{ width:100%; font:inherit; padding:13px 14px; border:2px solid var(--border); border-radius:12px; background:#fff; min-height:48px; color:var(--text); box-sizing:border-box; }
+  textarea{ min-height:96px; resize:vertical; }
+  input:focus,textarea:focus{ outline:none; border-color:var(--spm-accent); }
+  .venues{ border:2px solid var(--border); border-top:none; border-radius:0 0 12px 12px; max-height:260px; overflow:auto; display:none; background:#fff; margin-top:-2px; }
+  .venues.show{ display:block; }
+  .venues button{ display:block; width:100%; text-align:left; background:none; border:none; border-top:1px solid #f1f1f1; padding:13px 14px; font:inherit; min-height:48px; cursor:pointer; color:var(--text); }
+  .venues button:hover,.venues button:focus-visible{ background:#f3f6ff; outline:none; }
+  .venues button.other{ color:var(--spm-accent); font-weight:700; }
+  .picked{ display:flex; align-items:center; justify-content:space-between; gap:10px; border:2px solid var(--spm-accent); background:#eef2ff; border-radius:12px; padding:12px 14px; min-height:48px; }
+  .picked b{ font-size:1.05rem; }
+  .picked button{ background:none; border:none; color:var(--spm-accent); font:inherit; font-weight:700; cursor:pointer; min-height:40px; }
+  .rate{ display:grid; grid-template-columns:repeat(5,1fr); gap:6px; }
+  .rate button{ border:2px solid var(--border); background:#fff; border-radius:14px; padding:10px 2px; min-height:64px; font:inherit; cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:4px; color:var(--text); }
+  .rate button .e{ font-size:1.5rem; line-height:1; } .rate button .t{ font-size:.66rem; color:var(--muted); font-weight:700; letter-spacing:.02em; }
+  .rate button[aria-pressed="true"]{ border-color:var(--spm-accent); background:#eef2ff; }
+  .chips{ display:flex; flex-wrap:wrap; gap:8px; }
+  .chip{ border:2px solid var(--border); background:#fff; border-radius:999px; padding:10px 14px; font:inherit; font-size:.92rem; min-height:44px; cursor:pointer; color:var(--text); }
+  .chip[aria-pressed="true"]{ border-color:var(--spm-accent); background:#eef2ff; color:var(--spm-accent); font-weight:700; }
+  .opt{ border:2px solid var(--border); border-radius:14px; padding:12px 14px; }
+  .opt label.row{ display:flex; gap:12px; align-items:flex-start; cursor:pointer; min-height:44px; }
+  .opt input[type=checkbox]{ width:24px; height:24px; flex:0 0 auto; margin-top:2px; }
+  .opt .why{ color:var(--muted); font-size:.88rem; }
+  .apa{ margin-top:12px; display:none; } .apa.show{ display:block; }
+  .btn{ width:100%; font:inherit; font-weight:800; font-size:1.05rem; border:none; border-radius:999px; padding:15px 20px; min-height:54px; cursor:pointer; background:linear-gradient(135deg,var(--spm-primary),var(--spm-accent)); color:#fff; }
+  .btn:disabled{ background:#c9ccd6; cursor:not-allowed; }
+  .btn.ghost{ background:#fff; color:var(--text); border:2px solid var(--border); margin-top:10px; }
+  .err{ color:var(--spm-primary); font-size:.92rem; min-height:1.2em; margin:8px 0 0; }
+  .fine{ color:var(--muted); font-size:.82rem; text-align:center; margin:10px 0 0; }
+  .hp{ position:absolute; left:-9999px; width:1px; height:1px; opacity:0; }
+  .thanks{ text-align:center; padding:26px 8px; }
+  .thanks .big{ font-size:2.6rem; display:block; margin-bottom:8px; }
+  #updateOverlay{ position:fixed; inset:0; background:rgba(255,255,255,.96); z-index:9999; display:none; align-items:center; justify-content:center; flex-direction:column; gap:14px; text-align:center; padding:24px; }
+  #updateOverlay.show{ display:flex; }
+  #updateOverlay .sp{ width:42px; height:42px; border:4px solid #e5e7eb; border-top-color:var(--spm-primary); border-radius:50%; animation:vvspin 1s linear infinite; }
+  @keyframes vvspin{ to{ transform:rotate(360deg); } }
+</style>
+</head>
+<body>
+  <div id="updateOverlay"><div class="sp"></div><div><b>Updating…</b><br>Grabbing the latest version.</div></div>
+  <div class="spm-page">
+    <header class="spm-header">
+      <h1>Your Bar, Your Say 🎱</h1>
+      <p class="spm-subtitle">South Portland Metro APA</p>
+    </header>
+    <main class="spm-card">
+      <form id="f" novalidate>
+        <p class="lead">Two minutes. Tell the league what it's really like to play at your bar — the good, the bad, and what you'd change.</p>
+        <div class="anon" role="note"><span aria-hidden="true">🕶️</span><div><b>This is anonymous.</b> We don't ask your name, there's no login, and we don't keep your IP address. Nobody — including the league office — can tell who wrote what, unless you choose to tick the contact box at the bottom.</div></div>
+
+        <fieldset>
+          <legend>Which bar is this about?</legend>
+          <div id="pickWrap">
+            <input id="vq" type="search" placeholder="Start typing the bar's name…" autocomplete="off" aria-label="Bar name" aria-controls="vlist" aria-expanded="false">
+            <div class="venues" id="vlist" role="listbox"></div>
+          </div>
+          <div class="picked" id="picked" hidden><b id="pickedName"></b><button type="button" id="unpick">Change</button></div>
+          <div id="otherWrap" hidden style="margin-top:10px"><input id="vother" type="text" maxlength="80" placeholder="Name of the bar" aria-label="Name of the bar"></div>
+        </fieldset>
+
+        <fieldset>
+          <legend>Overall, how is it to play here?</legend>
+          <div class="rate" id="rate" role="radiogroup" aria-label="Overall rating">
+            <button type="button" data-r="1" aria-pressed="false"><span class="e">😖</span><span class="t">Terrible</span></button>
+            <button type="button" data-r="2" aria-pressed="false"><span class="e">😕</span><span class="t">Meh</span></button>
+            <button type="button" data-r="3" aria-pressed="false"><span class="e">😐</span><span class="t">OK</span></button>
+            <button type="button" data-r="4" aria-pressed="false"><span class="e">🙂</span><span class="t">Good</span></button>
+            <button type="button" data-r="5" aria-pressed="false"><span class="e">🤩</span><span class="t">Love it</span></button>
+          </div>
+        </fieldset>
+
+        <fieldset>
+          <label class="lbl" for="q1">What's good here — what makes you glad to play at this spot?</label>
+          <textarea id="q1" maxlength="1000" placeholder="Tables, people, staff, food, the vibe…"></textarea>
+        </fieldset>
+        <fieldset>
+          <label class="lbl" for="q2">What's not so good — anything that makes you not want to play here?</label>
+          <textarea id="q2" maxlength="1000" placeholder="Be honest — that's the point."></textarea>
+        </fieldset>
+        <fieldset>
+          <label class="lbl" for="q3">If you could change one thing here, what would it be?</label>
+          <textarea id="q3" maxlength="1000" placeholder="One thing. Big or small."></textarea>
+        </fieldset>
+
+        <fieldset>
+          <span class="lbl">What are your comments mostly about? <span class="sub" style="display:inline;font-weight:400">(optional — tap any)</span></span>
+          <div class="chips" id="chips">
+            <button type="button" class="chip" data-t="tables" aria-pressed="false">🎱 Tables &amp; equipment</button>
+            <button type="button" class="chip" data-t="lighting" aria-pressed="false">💡 Lighting</button>
+            <button type="button" class="chip" data-t="staff" aria-pressed="false">🙋 Staff &amp; service</button>
+            <button type="button" class="chip" data-t="food" aria-pressed="false">🍔 Food &amp; drink</button>
+            <button type="button" class="chip" data-t="parking" aria-pressed="false">🅿️ Parking &amp; getting there</button>
+            <button type="button" class="chip" data-t="space" aria-pressed="false">🔊 Noise &amp; space</button>
+            <button type="button" class="chip" data-t="safety" aria-pressed="false">🛡️ Safety &amp; atmosphere</button>
+            <button type="button" class="chip" data-t="prices" aria-pressed="false">💵 Prices</button>
+          </div>
+        </fieldset>
+
+        <fieldset>
+          <div class="opt">
+            <label class="row"><input type="checkbox" id="contact"><span><b>It's OK to contact me about this.</b><br><span class="why">Only if you want to. Tick this and we'll ask for your APA number so the league can follow up with a question. Leave it unticked to stay completely anonymous.</span></span></label>
+            <div class="apa" id="apa"><label class="lbl" for="apanum" style="font-size:.95rem">Your APA number</label><input id="apanum" type="tel" inputmode="numeric" maxlength="9" placeholder="8 digits" autocomplete="off"></div>
+          </div>
+        </fieldset>
+
+        <input class="hp" type="text" name="website" id="hp" tabindex="-1" autocomplete="off" aria-hidden="true">
+        <div class="err" id="err" aria-live="polite"></div>
+        <button class="btn" type="submit" id="send">Send anonymously</button>
+        <p class="fine" id="fine">Nothing you type here is tied to you.</p>
+      </form>
+
+      <div class="thanks" id="thanks" hidden>
+        <span class="big">🙌</span>
+        <h2 style="margin:0 0 6px">Thank you.</h2>
+        <p class="lead" id="thanksMsg">Your feedback went straight to the league — anonymously.</p>
+        <button class="btn ghost" type="button" id="again">Tell us about another bar</button>
+      </div>
+    </main>
+  </div>
+
+<script>
+  const $ = id => document.getElementById(id);
+  const SB_URL = 'https://dqzbekoaysgaiqljueac.supabase.co';
+  const ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRxemJla29heXNnYWlxbGp1ZWFjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUxNzA5NzgsImV4cCI6MjA5MDc0Njk3OH0.cCdGxZ4zEFzU_r6lWSDeoNWG67Q4MSYCAtpds035dfU';
+  const APP_NAME = 'VenueVoice';
+  const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+  const H = { apikey: ANON, Authorization: 'Bearer ' + ANON, 'Content-Type': 'application/json', 'Content-Profile': 'venuevoice', 'Accept-Profile': 'venuevoice' };
+  const rpc = async (fn, args) => { const r = await fetch(SB_URL + '/rest/v1/rpc/' + fn, { method: 'POST', headers: H, body: JSON.stringify(args || {}) }); if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); };
+  const S = { venues: [], host: null, other: false, rating: null, themes: new Set(), opened: Date.now() };
+  const pre = new URLSearchParams(location.search).get('host') || '';   // ?host=<slug> pre-picks a bar (QR at the venue)
+
+  /* ── venue picker ── */
+  async function loadVenues(){
+    try { S.venues = await rpc('venues'); } catch (e) { S.venues = []; }
+    if (pre) { const v = S.venues.find(x => x.slug === pre); if (v) pick(v); }
+  }
+  function renderList(){
+    const q = $('vq').value.trim().toLowerCase();
+    const hits = S.venues.filter(v => !q || v.name.toLowerCase().includes(q)).slice(0, 12);
+    $('vlist').innerHTML = hits.map(v => '<button type="button" role="option" data-id="' + v.host_id + '">' + esc(v.name) + '</button>').join('')
+      + '<button type="button" role="option" class="other" data-id="other">Somewhere else…</button>';
+    $('vlist').classList.add('show'); $('vq').setAttribute('aria-expanded', 'true');
+    $('vlist').querySelectorAll('button').forEach(b => b.addEventListener('click', () => { const id = b.dataset.id; if (id === 'other') pickOther(); else pick(S.venues.find(v => String(v.host_id) === id)); }));
+  }
+  function pick(v){ S.host = v; S.other = false; $('pickedName').textContent = v.name; $('picked').hidden = false; $('pickWrap').hidden = true; $('otherWrap').hidden = true; hideList(); }
+  function pickOther(){ S.host = null; S.other = true; $('pickedName').textContent = 'Somewhere else'; $('picked').hidden = false; $('pickWrap').hidden = true; $('otherWrap').hidden = false; hideList(); setTimeout(() => $('vother').focus(), 50); }
+  function unpick(){ S.host = null; S.other = false; $('picked').hidden = true; $('pickWrap').hidden = false; $('otherWrap').hidden = true; $('vq').value = ''; $('vq').focus(); }
+  function hideList(){ $('vlist').classList.remove('show'); $('vq').setAttribute('aria-expanded', 'false'); }
+  $('vq').addEventListener('input', renderList); $('vq').addEventListener('focus', renderList);
+  document.addEventListener('click', e => { if (!$('pickWrap').contains(e.target)) hideList(); });
+  $('unpick').addEventListener('click', unpick);
+
+  /* ── rating / chips / contact ── */
+  $('rate').querySelectorAll('button').forEach(b => b.addEventListener('click', () => { S.rating = Number(b.dataset.r); $('rate').querySelectorAll('button').forEach(o => o.setAttribute('aria-pressed', o === b ? 'true' : 'false')); }));
+  $('chips').querySelectorAll('.chip').forEach(b => b.addEventListener('click', () => { const t = b.dataset.t; if (S.themes.has(t)) S.themes.delete(t); else S.themes.add(t); b.setAttribute('aria-pressed', S.themes.has(t) ? 'true' : 'false'); }));
+  $('contact').addEventListener('change', () => { const on = $('contact').checked; $('apa').classList.toggle('show', on); $('send').textContent = on ? 'Send with my APA number' : 'Send anonymously'; $('fine').textContent = on ? 'Only your APA number goes with this — so the league can follow up.' : 'Nothing you type here is tied to you.'; if (on) setTimeout(() => $('apanum').focus(), 50); });
+
+  /* ── submit ── */
+  $('f').addEventListener('submit', async e => {
+    e.preventDefault();
+    const err = $('err'); err.textContent = '';
+    if (!S.host && !S.other) { err.textContent = 'Pick the bar first.'; $('vq').focus(); return; }
+    const other = $('vother').value.trim();
+    if (S.other && other.length < 2) { err.textContent = 'Which bar is this about?'; $('vother').focus(); return; }
+    const q1 = $('q1').value.trim(), q2 = $('q2').value.trim(), q3 = $('q3').value.trim();
+    if (!S.rating && !q1 && !q2 && !q3) { err.textContent = 'Tap a rating or answer at least one question.'; return; }
+    const contact = $('contact').checked, apa = $('apanum').value.replace(/\D/g, '');
+    if (contact && apa.length !== 8) { err.textContent = 'Your APA number is 8 digits — or untick the contact box to stay anonymous.'; $('apanum').focus(); return; }
+    $('send').disabled = true;
+    try {
+      const r = await rpc('submit', { p_host_id: S.host ? S.host.host_id : null, p_venue_name: S.other ? other : null, p_rating: S.rating, p_good: q1, p_bad: q2, p_change: q3, p_themes: [...S.themes], p_contact_ok: contact, p_member_number: contact ? apa : null, p_hp: $('hp').value, p_fill_ms: Date.now() - S.opened });
+      if (!r || !r.ok) { err.textContent = (r && r.error) || 'Something went wrong — try again.'; $('send').disabled = false; return; }
+      $('thanksMsg').textContent = contact ? 'Your feedback went to the league with your APA number, in case they have a question.' : 'Your feedback went straight to the league — anonymously.';
+      $('f').hidden = true; $('thanks').hidden = false; window.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch (ex) { err.textContent = 'Could not send — check your connection and try again.'; $('send').disabled = false; }
+  });
+  $('again').addEventListener('click', () => { $('f').reset(); S.host = null; S.other = false; S.rating = null; S.themes.clear(); S.opened = Date.now(); unpick(); $('rate').querySelectorAll('button').forEach(o => o.setAttribute('aria-pressed', 'false')); $('chips').querySelectorAll('.chip').forEach(o => o.setAttribute('aria-pressed', 'false')); $('apa').classList.remove('show'); $('send').disabled = false; $('send').textContent = 'Send anonymously'; $('fine').textContent = 'Nothing you type here is tied to you.'; $('thanks').hidden = true; $('f').hidden = false; window.scrollTo(0, 0); });
+
+  /* ── Auto-updater (checkVersion → pollForDeploy; reference_deploy.md) ── */
+  function cmpVer(a, b){ const pa = String(a).split('.'), pb = String(b).split('.'); for (let i = 0; i < Math.max(pa.length, pb.length); i++) { const x = parseInt(pa[i], 10) || 0, y = parseInt(pb[i], 10) || 0; if (x > y) return 1; if (x < y) return -1; } return 0; }
+  let _versionMismatch = false;
+  async function checkVersion(){
+    if (_versionMismatch) return;
+    try {
+      const r = await fetch(SB_URL + '/rest/v1/apps?app_name=eq.' + APP_NAME + '&select=version', { headers:{ apikey:ANON, Authorization:'Bearer '+ANON, 'Accept-Profile':'apa_core' } });
+      const rows = await r.json(); const remote = rows && rows[0] && rows[0].version;
+      if (!remote || remote === window.APP_VERSION || cmpVer(remote, window.APP_VERSION) <= 0) return;
+      if (!$('f').hidden && ($('q1').value || $('q2').value || $('q3').value)) return;   // never yank a half-written form
+      _versionMismatch = true; $('updateOverlay').classList.add('show'); pollForDeploy();
+    } catch(e){}
+  }
+  function pollForDeploy(){
+    const started = Date.now();
+    const tick = async () => {
+      try { const r = await fetch('version.js?cb=' + Date.now(), { cache:'no-store' }); const m = (await r.text()).match(/APP_VERSION\s*=\s*'([0-9.]+)'/);
+        if (m && m[1] !== window.APP_VERSION) { const u = new URL(location.href); u.searchParams.set('v', m[1]); location.replace(u.pathname + u.search); return; } } catch(e){}
+      if (Date.now() - started < 120000) setTimeout(tick, 5000); else { $('updateOverlay').classList.remove('show'); _versionMismatch = false; }
+    };
+    tick();
+  }
+  loadVenues();
+  setInterval(checkVersion, 30000);
+</script>
+</body>
+</html>
