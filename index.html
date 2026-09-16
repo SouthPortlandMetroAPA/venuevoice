@@ -47,7 +47,7 @@
   .venues.show{ display:block; }
   .venues button{ display:block; width:100%; text-align:left; background:none; border:none; border-top:1px solid #f1f1f1; padding:13px 14px; font:inherit; min-height:48px; cursor:pointer; color:var(--text); }
   .venues button:hover,.venues button:focus-visible{ background:#f3f6ff; outline:none; }
-  .venues button.other{ color:var(--spm-accent); font-weight:700; }
+  .venues button.more{ color:var(--spm-accent); font-weight:700; text-align:center; }
   .picked{ display:flex; align-items:center; justify-content:space-between; gap:10px; border:2px solid var(--spm-accent); background:#eef2ff; border-radius:12px; padding:12px 14px; min-height:48px; }
   .picked b{ font-size:1.05rem; }
   .picked button{ background:none; border:none; color:var(--spm-accent); font:inherit; font-weight:700; cursor:pointer; min-height:40px; }
@@ -113,7 +113,6 @@
             <div class="venues" id="vlist" role="listbox"></div>
           </div>
           <div class="picked" id="picked" hidden><b id="pickedName"></b><button type="button" id="unpick">Change</button></div>
-          <div id="otherWrap" hidden style="margin-top:10px"><input id="vother" type="text" maxlength="80" placeholder="Name of the bar" aria-label="Name of the bar"></div>
         </fieldset>
 
         <fieldset>
@@ -243,7 +242,7 @@
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
   const H = { apikey: ANON, Authorization: 'Bearer ' + ANON, 'Content-Type': 'application/json', 'Content-Profile': 'venuevoice', 'Accept-Profile': 'venuevoice' };
   const rpc = async (fn, args) => { const r = await fetch(SB_URL + '/rest/v1/rpc/' + fn, { method: 'POST', headers: H, body: JSON.stringify(args || {}) }); if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); };
-  const S = { venues: [], host: null, other: false, rating: null, themes: new Set(), opened: Date.now(),
+  const S = { venues: [], host: null, page: 12, rating: null, themes: new Set(), opened: Date.now(),
               playsHere: null, stay: null, freqNow: null, changes: new Set(), freqIf: null, sure: null };
   const FREQ_MID = { never: 0, rare: 0.4, monthly: 1, weekly: 3.5 };   // same midpoints as venuevoice.freq_mid
   const pre = new URLSearchParams(location.search).get('host') || '';   // ?host=<slug> pre-picks a bar (QR at the venue)
@@ -253,19 +252,20 @@
     try { S.venues = await rpc('venues'); } catch (e) { S.venues = []; }
     if (pre) { const v = S.venues.find(x => x.slug === pre); if (v) pick(v); }
   }
-  function renderList(){
+  /* 12 at a time; "Load more" reveals the next 12 of the current matches (0.6 — replaced the free-text "Somewhere else") */
+  function renderList(reset){
+    if (reset) S.page = 12;
     const q = $('vq').value.trim().toLowerCase();
-    const hits = S.venues.filter(v => !q || v.name.toLowerCase().includes(q)).slice(0, 12);
+    const all = S.venues.filter(v => !q || v.name.toLowerCase().includes(q)), hits = all.slice(0, S.page), left = all.length - hits.length;
     $('vlist').innerHTML = hits.map(v => '<button type="button" role="option" data-id="' + v.host_id + '">' + esc(v.name) + '</button>').join('')
-      + '<button type="button" role="option" class="other" data-id="other">Somewhere else…</button>';
+      + (left > 0 ? '<button type="button" class="more" data-id="more">Load more (' + left + ' more)</button>' : (all.length ? '' : '<button type="button" disabled>No SPM host bar matches that</button>'));
     $('vlist').classList.add('show'); $('vq').setAttribute('aria-expanded', 'true');
-    $('vlist').querySelectorAll('button').forEach(b => b.addEventListener('click', () => { const id = b.dataset.id; if (id === 'other') pickOther(); else pick(S.venues.find(v => String(v.host_id) === id)); }));
+    $('vlist').querySelectorAll('button[data-id]').forEach(b => b.addEventListener('click', e => { const id = b.dataset.id; if (id === 'more') { e.preventDefault(); S.page += 12; renderList(false); $('vlist').scrollTop = $('vlist').scrollHeight; } else pick(S.venues.find(v => String(v.host_id) === id)); }));
   }
-  function pick(v){ S.host = v; S.other = false; $('pickedName').textContent = v.name; $('picked').hidden = false; $('pickWrap').hidden = true; $('otherWrap').hidden = true; hideList(); }
-  function pickOther(){ S.host = null; S.other = true; $('pickedName').textContent = 'Somewhere else'; $('picked').hidden = false; $('pickWrap').hidden = true; $('otherWrap').hidden = false; hideList(); setTimeout(() => $('vother').focus(), 50); }
-  function unpick(){ S.host = null; S.other = false; $('picked').hidden = true; $('pickWrap').hidden = false; $('otherWrap').hidden = true; $('vq').value = ''; $('vq').focus(); }
+  function pick(v){ S.host = v; $('pickedName').textContent = v.name; $('picked').hidden = false; $('pickWrap').hidden = true; hideList(); }
+  function unpick(){ S.host = null; $('picked').hidden = true; $('pickWrap').hidden = false; $('vq').value = ''; $('vq').focus(); }
   function hideList(){ $('vlist').classList.remove('show'); $('vq').setAttribute('aria-expanded', 'false'); }
-  $('vq').addEventListener('input', renderList); $('vq').addEventListener('focus', renderList);
+  $('vq').addEventListener('input', () => renderList(true)); $('vq').addEventListener('focus', () => renderList(false));
   document.addEventListener('click', e => { if (!$('pickWrap').contains(e.target)) hideList(); });
   $('unpick').addEventListener('click', unpick);
 
@@ -340,9 +340,7 @@
   $('f').addEventListener('submit', async e => {
     e.preventDefault();
     const err = $('err'); err.textContent = '';
-    if (!S.host && !S.other) { err.textContent = 'Pick the bar first.'; $('vq').focus(); return; }
-    const other = $('vother').value.trim();
-    if (S.other && other.length < 2) { err.textContent = 'Which bar is this about?'; $('vother').focus(); return; }
+    if (!S.host) { err.textContent = 'Pick the bar first.'; $('vq').focus(); return; }
     const q1 = $('q1').value.trim(), q2 = $('q2').value.trim(), q3 = $('q3').value.trim();
     if (!S.playsHere) { err.textContent = 'Do you play league here? Tap one.'; $('playsHere').scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
     if (!S.rating && !q1 && !q2 && !q3 && !S.freqNow && S.stay == null) { err.textContent = 'Tap a rating or answer at least one question.'; return; }
@@ -350,7 +348,7 @@
     if (contact && !apa) { err.textContent = 'Pick yourself from the list — or untick the contact box to stay anonymous.'; $('cdSearch').focus(); return; }
     $('send').disabled = true;
     try {
-      const r = await rpc('submit', { p_host_id: S.host ? S.host.host_id : null, p_venue_name: S.other ? other : null, p_rating: S.rating, p_good: q1, p_bad: q2, p_change: q3, p_themes: [...S.themes], p_contact_ok: contact, p_member_number: contact ? apa : null, p_hp: $('hp').value, p_fill_ms: Date.now() - S.opened,
+      const r = await rpc('submit', { p_host_id: S.host.host_id, p_venue_name: null, p_rating: S.rating, p_good: q1, p_bad: q2, p_change: q3, p_themes: [...S.themes], p_contact_ok: contact, p_member_number: contact ? apa : null, p_hp: $('hp').value, p_fill_ms: Date.now() - S.opened,
         p_plays_here: S.playsHere, p_stay_p: S.playsHere === 'now' ? S.stay : null, p_freq_now: S.freqNow, p_changes: [...S.changes], p_freq_if: S.freqIf, p_sure_p: S.sure });
       if (!r || !r.ok) { err.textContent = (r && r.error) || 'Something went wrong — try again.'; $('send').disabled = false; return; }
       $('thanksMsg').textContent = contact ? 'Your feedback went to the league with your APA number — a copy is on its way to your email.' : 'Your feedback went straight to the league — anonymously.';
@@ -362,7 +360,7 @@
   });
   /* a second review keeps the ORIGINAL open time — the person has already proven they are not a bot;
      resetting it made every follow-up review look like a <4 s bot fill and vanish silently (found in VERIFY) */
-  $('again').addEventListener('click', () => { $('f').reset(); S.host = null; S.other = false; S.rating = null; S.themes.clear(); unpick();
+  $('again').addEventListener('click', () => { $('f').reset(); S.host = null; S.rating = null; S.themes.clear(); unpick();
     S.playsHere = null; S.stay = null; S.freqNow = null; S.changes.clear(); S.freqIf = null; S.sure = null; ['playsHere', 'stay', 'freqNow', 'changes', 'freqIf', 'sure'].forEach(clearGroup); syncFollowups(); $('rate').querySelectorAll('button').forEach(o => o.setAttribute('aria-pressed', 'false')); $('chips').querySelectorAll('.chip').forEach(o => o.setAttribute('aria-pressed', 'false')); $('apa').classList.remove('show'); cdClear(); $('send').disabled = false; $('send').textContent = 'Send anonymously'; $('fine').textContent = 'Nothing you type here is tied to you.'; $('thanks').hidden = true; $('f').hidden = false; window.scrollTo(0, 0); });
 
   /* ── Auto-updater (checkVersion → pollForDeploy; reference_deploy.md) ── */
