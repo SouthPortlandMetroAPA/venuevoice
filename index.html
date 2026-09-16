@@ -3,9 +3,12 @@
   VenueVoice — South Portland Metro APA · anonymous player feedback on host locations (v0.1)
   ─────────────────────────────────────────────────────────────────────────────
   Brief: tools/claude/briefs/2026-09-15-venuevoice-host-feedback.md  (T2)
-  WHAT  a player picks the bar they play at, taps a 1–5 rating, answers three open
-        questions (what's good / what's not / change one thing), optionally tags themes,
-        and sends. ANONYMOUS by default and it says so; an explicit checkbox reveals an
+  WHAT  a player picks the bar they play at, says whether they play league there (required),
+        taps a 1–5 rating, answers three open questions (what's good / what's not / change one
+        thing), optionally tags themes, and — 0.5, owner metrics — answers a 0–10 "keep playing
+        here?" (current players), an off-night visit frequency now, what would need to change,
+        the off-night frequency IF it changed, and how sure they are (0–10). Then sends.
+        Owner numbers are computed ONCE in SQL (venuevoice.owner_metrics); Slate shows them. ANONYMOUS by default and it says so; an explicit checkbox reveals an
         APA-number field for players who are happy to be contacted.
   DATA  venues: rpc venuevoice.venues() (hosts on the current session's RackTime schedule).
         submit: rpc venuevoice.submit(...) — SECURITY DEFINER; validates, honeypot,
@@ -53,6 +56,11 @@
   .rate button .e{ font-size:1.5rem; line-height:1; } .rate button .t{ font-size:.66rem; color:var(--muted); font-weight:700; letter-spacing:.02em; }
   .rate button[aria-pressed="true"]{ border-color:var(--spm-accent); background:#eef2ff; }
   .chips{ display:flex; flex-wrap:wrap; gap:8px; }
+  .prob{ display:grid; grid-template-columns:repeat(11,1fr); gap:4px; }
+  .prob button{ border:2px solid var(--border); background:#fff; border-radius:10px; min-height:48px; font:inherit; font-weight:700; cursor:pointer; color:var(--text); padding:0; }
+  .prob button[aria-pressed="true"]{ border-color:var(--spm-accent); background:#eef2ff; color:var(--spm-accent); }
+  .prob-lbl{ display:flex; justify-content:space-between; color:var(--muted); font-size:.78rem; margin-top:4px; }
+  .prob-lbl span:nth-child(2){ text-align:center; }
   .chip{ border:2px solid var(--border); background:#fff; border-radius:999px; padding:10px 14px; font:inherit; font-size:.92rem; min-height:48px; cursor:pointer; color:var(--text); }
   .chip[aria-pressed="true"]{ border-color:var(--spm-accent); background:#eef2ff; color:var(--spm-accent); font-weight:700; }
   .opt{ border:2px solid var(--border); border-radius:14px; padding:12px 14px; }
@@ -96,7 +104,7 @@
     <main class="spm-card">
       <form id="f" novalidate>
         <p class="lead">Two minutes. Tell the league what it's really like to play at your bar — the good, the bad, and what you'd change.</p>
-        <div class="anon" role="note"><span aria-hidden="true">🕶️</span><div><b>This is anonymous.</b> We don't ask your name, there's no login, and we don't keep your IP address. Nobody — including the league office — can tell who wrote what, unless you choose to tick the contact box at the bottom.</div></div>
+        <div class="anon" role="note"><span aria-hidden="true">🕶️</span><div><b>This is anonymous.</b> We don't ask your name, there's no login, and we don't keep your IP address. Nobody — including the league office — can tell who wrote what, unless you choose to tick the contact box at the bottom. <b style="display:inline">We hand the totals to the bar. Never your name.</b></div></div>
 
         <fieldset>
           <legend>Which bar is this about?</legend>
@@ -106,6 +114,21 @@
           </div>
           <div class="picked" id="picked" hidden><b id="pickedName"></b><button type="button" id="unpick">Change</button></div>
           <div id="otherWrap" hidden style="margin-top:10px"><input id="vother" type="text" maxlength="80" placeholder="Name of the bar" aria-label="Name of the bar"></div>
+        </fieldset>
+
+        <fieldset>
+          <legend>Do you play league here?</legend>
+          <div class="chips" id="playsHere" role="radiogroup" aria-label="Do you play league here?">
+            <button type="button" class="chip" data-v="now" aria-pressed="false">Yes, this session</button>
+            <button type="button" class="chip" data-v="used_to" aria-pressed="false">I used to</button>
+            <button type="button" class="chip" data-v="no" aria-pressed="false">No</button>
+          </div>
+        </fieldset>
+
+        <fieldset id="stayWrap" hidden>
+          <legend>How likely are you to keep playing here next session?</legend>
+          <div class="prob" id="stay" role="radiogroup" aria-label="Likelihood of keeping playing here, 0 to 10"></div>
+          <div class="prob-lbl" aria-hidden="true"><span>No chance</span><span>50-50</span><span>Certain</span></div>
         </fieldset>
 
         <fieldset>
@@ -147,6 +170,47 @@
         </fieldset>
 
         <fieldset>
+          <legend>Outside league night, how often do you come here now?</legend>
+          <div class="chips" id="freqNow" role="radiogroup" aria-label="Off-night visits now">
+            <button type="button" class="chip" data-v="never" aria-pressed="false">Never</button>
+            <button type="button" class="chip" data-v="rare" aria-pressed="false">Once or twice a session</button>
+            <button type="button" class="chip" data-v="monthly" aria-pressed="false">About once a month</button>
+            <button type="button" class="chip" data-v="weekly" aria-pressed="false">Most weeks</button>
+          </div>
+        </fieldset>
+
+        <fieldset>
+          <span class="lbl">What would need to change for you to come more often? <span class="sub" style="display:inline;font-weight:400">(tap any)</span></span>
+          <div class="chips" id="changes">
+            <button type="button" class="chip" data-c="tables" aria-pressed="false">🎱 Tables &amp; equipment</button>
+            <button type="button" class="chip" data-c="lighting" aria-pressed="false">💡 Lighting</button>
+            <button type="button" class="chip" data-c="staff" aria-pressed="false">🙋 Staff &amp; service</button>
+            <button type="button" class="chip" data-c="food" aria-pressed="false">🍔 Food &amp; drink</button>
+            <button type="button" class="chip" data-c="parking" aria-pressed="false">🅿️ Parking &amp; getting there</button>
+            <button type="button" class="chip" data-c="space" aria-pressed="false">🔊 Noise &amp; space</button>
+            <button type="button" class="chip" data-c="safety" aria-pressed="false">🛡️ Safety &amp; atmosphere</button>
+            <button type="button" class="chip" data-c="prices" aria-pressed="false">💵 Prices</button>
+            <button type="button" class="chip" data-c="nothing" aria-pressed="false">Nothing would</button>
+          </div>
+        </fieldset>
+
+        <fieldset id="freqIfWrap" hidden>
+          <legend>If those changed, how often would you come outside league night?</legend>
+          <div class="chips" id="freqIf" role="radiogroup" aria-label="Off-night visits if those changed">
+            <button type="button" class="chip" data-v="never" aria-pressed="false">Never</button>
+            <button type="button" class="chip" data-v="rare" aria-pressed="false">Once or twice a session</button>
+            <button type="button" class="chip" data-v="monthly" aria-pressed="false">About once a month</button>
+            <button type="button" class="chip" data-v="weekly" aria-pressed="false">Most weeks</button>
+          </div>
+        </fieldset>
+
+        <fieldset id="sureWrap" hidden>
+          <legend>How sure are you?</legend>
+          <div class="prob" id="sure" role="radiogroup" aria-label="How sure, 0 to 10"></div>
+          <div class="prob-lbl" aria-hidden="true"><span>Not at all</span><span>50-50</span><span>Certain</span></div>
+        </fieldset>
+
+        <fieldset>
           <div class="opt">
             <label class="row"><input type="checkbox" id="contact"><span><b>It's OK to contact me about this.</b><br><span class="why">Only if you want to. Tick this and pick yourself from the member list so the league can follow up with a question — and we'll email you a copy of your feedback. Leave it unticked to stay completely anonymous.</span></span></label>
             <div class="apa" id="apa"><label class="lbl" for="cdSearch" style="font-size:.95rem">Who are you?</label>
@@ -179,7 +243,9 @@
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
   const H = { apikey: ANON, Authorization: 'Bearer ' + ANON, 'Content-Type': 'application/json', 'Content-Profile': 'venuevoice', 'Accept-Profile': 'venuevoice' };
   const rpc = async (fn, args) => { const r = await fetch(SB_URL + '/rest/v1/rpc/' + fn, { method: 'POST', headers: H, body: JSON.stringify(args || {}) }); if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); };
-  const S = { venues: [], host: null, other: false, rating: null, themes: new Set(), opened: Date.now() };
+  const S = { venues: [], host: null, other: false, rating: null, themes: new Set(), opened: Date.now(),
+              playsHere: null, stay: null, freqNow: null, changes: new Set(), freqIf: null, sure: null };
+  const FREQ_MID = { never: 0, rare: 0.4, monthly: 1, weekly: 3.5 };   // same midpoints as venuevoice.freq_mid
   const pre = new URLSearchParams(location.search).get('host') || '';   // ?host=<slug> pre-picks a bar (QR at the venue)
 
   /* ── venue picker ── */
@@ -238,6 +304,33 @@
     document.addEventListener('click', e => { if (!e.target.closest('.cd-search')) cdClose(); });
   })();
 
+  /* ── owner-metric questions (brief 2026-09-16): single-choice chip groups + 0–10 probability rows,
+        each follow-up shown only when it applies (R for current players; F2 when a change is named;
+        C when the projected frequency is higher than now) ── */
+  function single(groupId, attr, onPick){ $(groupId).querySelectorAll('.chip').forEach(b => b.addEventListener('click', () => { const v = b.dataset[attr]; $(groupId).querySelectorAll('.chip').forEach(o => o.setAttribute('aria-pressed', o === b ? 'true' : 'false')); onPick(v); })); }
+  function probRow(id, onPick){ const el = $(id); el.innerHTML = ''; for (let i = 0; i <= 10; i++) { const b = document.createElement('button'); b.type = 'button'; b.textContent = String(i); b.setAttribute('aria-pressed', 'false'); b.setAttribute('aria-label', i + ' of 10'); b.addEventListener('click', () => { el.querySelectorAll('button').forEach(o => o.setAttribute('aria-pressed', o === b ? 'true' : 'false')); onPick(i); }); el.appendChild(b); } }
+  function clearGroup(id){ $(id).querySelectorAll('button').forEach(o => o.setAttribute('aria-pressed', 'false')); }
+  function syncFollowups(){
+    const askStay = S.playsHere === 'now';
+    $('stayWrap').hidden = !askStay; if (!askStay) { S.stay = null; clearGroup('stay'); }
+    const named = [...S.changes].some(c => c !== 'nothing');
+    $('freqIfWrap').hidden = !named; if (!named) { S.freqIf = null; clearGroup('freqIf'); }
+    const askSure = named && S.freqIf && (FREQ_MID[S.freqIf] > (FREQ_MID[S.freqNow] || 0));
+    $('sureWrap').hidden = !askSure; if (!askSure) { S.sure = null; clearGroup('sure'); }
+  }
+  single('playsHere', 'v', v => { S.playsHere = v; syncFollowups(); });
+  single('freqNow', 'v', v => { S.freqNow = v; syncFollowups(); });
+  single('freqIf', 'v', v => { S.freqIf = v; syncFollowups(); });
+  probRow('stay', v => { S.stay = v; });
+  probRow('sure', v => { S.sure = v; });
+  $('changes').querySelectorAll('.chip').forEach(b => b.addEventListener('click', () => {
+    const c = b.dataset.c;
+    if (c === 'nothing') { const on = !S.changes.has('nothing'); S.changes.clear(); if (on) S.changes.add('nothing'); }   // "nothing" is exclusive
+    else { S.changes.delete('nothing'); if (S.changes.has(c)) S.changes.delete(c); else S.changes.add(c); }
+    $('changes').querySelectorAll('.chip').forEach(o => o.setAttribute('aria-pressed', S.changes.has(o.dataset.c) ? 'true' : 'false'));
+    syncFollowups();
+  }));
+
   /* ── rating / chips / contact ── */
   $('rate').querySelectorAll('button').forEach(b => b.addEventListener('click', () => { S.rating = Number(b.dataset.r); $('rate').querySelectorAll('button').forEach(o => o.setAttribute('aria-pressed', o === b ? 'true' : 'false')); }));
   $('chips').querySelectorAll('.chip').forEach(b => b.addEventListener('click', () => { const t = b.dataset.t; if (S.themes.has(t)) S.themes.delete(t); else S.themes.add(t); b.setAttribute('aria-pressed', S.themes.has(t) ? 'true' : 'false'); }));
@@ -251,12 +344,14 @@
     const other = $('vother').value.trim();
     if (S.other && other.length < 2) { err.textContent = 'Which bar is this about?'; $('vother').focus(); return; }
     const q1 = $('q1').value.trim(), q2 = $('q2').value.trim(), q3 = $('q3').value.trim();
-    if (!S.rating && !q1 && !q2 && !q3) { err.textContent = 'Tap a rating or answer at least one question.'; return; }
+    if (!S.playsHere) { err.textContent = 'Do you play league here? Tap one.'; $('playsHere').scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
+    if (!S.rating && !q1 && !q2 && !q3 && !S.freqNow && S.stay == null) { err.textContent = 'Tap a rating or answer at least one question.'; return; }
     const contact = $('contact').checked, apa = _cdPicked ? _cdPicked.member_number : '';
     if (contact && !apa) { err.textContent = 'Pick yourself from the list — or untick the contact box to stay anonymous.'; $('cdSearch').focus(); return; }
     $('send').disabled = true;
     try {
-      const r = await rpc('submit', { p_host_id: S.host ? S.host.host_id : null, p_venue_name: S.other ? other : null, p_rating: S.rating, p_good: q1, p_bad: q2, p_change: q3, p_themes: [...S.themes], p_contact_ok: contact, p_member_number: contact ? apa : null, p_hp: $('hp').value, p_fill_ms: Date.now() - S.opened });
+      const r = await rpc('submit', { p_host_id: S.host ? S.host.host_id : null, p_venue_name: S.other ? other : null, p_rating: S.rating, p_good: q1, p_bad: q2, p_change: q3, p_themes: [...S.themes], p_contact_ok: contact, p_member_number: contact ? apa : null, p_hp: $('hp').value, p_fill_ms: Date.now() - S.opened,
+        p_plays_here: S.playsHere, p_stay_p: S.playsHere === 'now' ? S.stay : null, p_freq_now: S.freqNow, p_changes: [...S.changes], p_freq_if: S.freqIf, p_sure_p: S.sure });
       if (!r || !r.ok) { err.textContent = (r && r.error) || 'Something went wrong — try again.'; $('send').disabled = false; return; }
       $('thanksMsg').textContent = contact ? 'Your feedback went to the league with your APA number — a copy is on its way to your email.' : 'Your feedback went straight to the league — anonymously.';
       /* opted-in only: the RPC minted a one-time token; the mailer redeems it and emails the copy.
@@ -267,7 +362,8 @@
   });
   /* a second review keeps the ORIGINAL open time — the person has already proven they are not a bot;
      resetting it made every follow-up review look like a <4 s bot fill and vanish silently (found in VERIFY) */
-  $('again').addEventListener('click', () => { $('f').reset(); S.host = null; S.other = false; S.rating = null; S.themes.clear(); unpick(); $('rate').querySelectorAll('button').forEach(o => o.setAttribute('aria-pressed', 'false')); $('chips').querySelectorAll('.chip').forEach(o => o.setAttribute('aria-pressed', 'false')); $('apa').classList.remove('show'); cdClear(); $('send').disabled = false; $('send').textContent = 'Send anonymously'; $('fine').textContent = 'Nothing you type here is tied to you.'; $('thanks').hidden = true; $('f').hidden = false; window.scrollTo(0, 0); });
+  $('again').addEventListener('click', () => { $('f').reset(); S.host = null; S.other = false; S.rating = null; S.themes.clear(); unpick();
+    S.playsHere = null; S.stay = null; S.freqNow = null; S.changes.clear(); S.freqIf = null; S.sure = null; ['playsHere', 'stay', 'freqNow', 'changes', 'freqIf', 'sure'].forEach(clearGroup); syncFollowups(); $('rate').querySelectorAll('button').forEach(o => o.setAttribute('aria-pressed', 'false')); $('chips').querySelectorAll('.chip').forEach(o => o.setAttribute('aria-pressed', 'false')); $('apa').classList.remove('show'); cdClear(); $('send').disabled = false; $('send').textContent = 'Send anonymously'; $('fine').textContent = 'Nothing you type here is tied to you.'; $('thanks').hidden = true; $('f').hidden = false; window.scrollTo(0, 0); });
 
   /* ── Auto-updater (checkVersion → pollForDeploy; reference_deploy.md) ── */
   function cmpVer(a, b){ const pa = String(a).split('.'), pb = String(b).split('.'); for (let i = 0; i < Math.max(pa.length, pb.length); i++) { const x = parseInt(pa[i], 10) || 0, y = parseInt(pb[i], 10) || 0; if (x > y) return 1; if (x < y) return -1; } return 0; }
